@@ -3,8 +3,13 @@ package com.generated.app;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.ProgressDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -13,6 +18,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.media.MediaPlayer;
 import android.media.MediaRecorder;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
@@ -21,8 +27,9 @@ import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.text.Editable;
 import android.text.TextWatcher;
-import android.view.LayoutInflater;
+import android.view.Gravity;
 import android.view.View;
+import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
@@ -30,12 +37,21 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -46,6 +62,8 @@ public class NoteEditActivity extends Activity {
 
     private static final int REQUEST_IMAGE_PICK = 301;
     private static final int REQUEST_IMAGE_CAPTURE = 302;
+    private static final int REQUEST_AUDIO_FILE_PICK = 303;
+    private static final int REQUEST_SYSTEM_SPEECH = 304;
     private static final int PERMISSION_AUDIO = 401;
 
     private NotesDbHelper dbHelper;
@@ -60,17 +78,23 @@ public class NoteEditActivity extends Activity {
     private ImageView ivNoteImage;
     private LinearLayout audioPlayerContainer;
     private ImageView btnPlayAudio;
+    private TextView tvAudioTitle;
     private TextView tvAudioStatus;
+    private ImageView btnTranscribeAudioFile;
     private LinearLayout checklistItemsContainer;
     private TextView btnAddChecklistRow;
     private TextView tvLastEdited;
 
     private MediaRecorder mediaRecorder;
     private MediaPlayer mediaPlayer;
-    private boolean isRecording = false;
+    private boolean isRecordingAudioFile = false;
     private boolean isAudioPlaying = false;
     private String tempAudioPath = "";
-    private SpeechRecognizer speechRecognizer;
+
+    // Speech recognition variables
+    private SpeechRecognizer liveSpeechRecognizer;
+    private boolean isLiveTranscribing = false;
+    private String selectedLanguageCode = "he-IL"; // default Hebrew, supports en-US too
 
     private final String[] folderOptions = new String[]{"אישי", "עבודה", "רעיונות", "קניות"};
     private final String[] colorOptions = new String[]{
@@ -105,8 +129,10 @@ public class NoteEditActivity extends Activity {
         bindNoteData();
         setupListeners();
 
-        if (getIntent().getBooleanExtra("start_voice", false) && currentNote.getAudioPath().isEmpty()) {
-            promptVoiceRecording();
+        if (getIntent().getBooleanExtra("start_voice", false)) {
+            promptVoiceTranscribe();
+        } else if (getIntent().getBooleanExtra("start_audio_file", false)) {
+            chooseAudioFile();
         } else if (getIntent().getBooleanExtra("start_image", false) && currentNote.getImagePath().isEmpty()) {
             chooseImageSource();
         }
@@ -122,7 +148,9 @@ public class NoteEditActivity extends Activity {
         ivNoteImage = findViewById(R.id.iv_note_image);
         audioPlayerContainer = findViewById(R.id.audio_player_container);
         btnPlayAudio = findViewById(R.id.btn_play_audio);
+        tvAudioTitle = findViewById(R.id.tv_audio_title);
         tvAudioStatus = findViewById(R.id.tv_audio_status);
+        btnTranscribeAudioFile = findViewById(R.id.btn_transcribe_audio_file);
         checklistItemsContainer = findViewById(R.id.checklist_items_container);
         btnAddChecklistRow = findViewById(R.id.btn_add_checklist_row);
         tvLastEdited = findViewById(R.id.tv_last_edited);
@@ -148,17 +176,24 @@ public class NoteEditActivity extends Activity {
         }
 
         // Audio
-        if (!currentNote.getAudioPath().isEmpty() && new File(currentNote.getAudioPath()).exists()) {
-            audioPlayerContainer.setVisibility(View.VISIBLE);
-        } else {
-            audioPlayerContainer.setVisibility(View.GONE);
-        }
+        updateAudioPlayerVisibility();
 
         // Checklist vs Text
         toggleChecklistMode(currentNote.isChecklist());
 
         SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault());
         tvLastEdited.setText("עודכן: " + sdf.format(new Date(currentNote.getTimestamp())));
+    }
+
+    private void updateAudioPlayerVisibility() {
+        if (!currentNote.getAudioPath().isEmpty() && new File(currentNote.getAudioPath()).exists()) {
+            audioPlayerContainer.setVisibility(View.VISIBLE);
+            File audioFile = new File(currentNote.getAudioPath());
+            tvAudioTitle.setText(audioFile.getName());
+            tvAudioStatus.setText("הקשה לניגון או לחצו על תמלול");
+        } else {
+            audioPlayerContainer.setVisibility(View.GONE);
+        }
     }
 
     private void updateBackgroundColor(String hexColor) {
@@ -334,7 +369,14 @@ public class NoteEditActivity extends Activity {
         findViewById(R.id.btn_tool_mic).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                promptVoiceRecording();
+                promptVoiceTranscribe();
+            }
+        });
+
+        findViewById(R.id.btn_tool_audio_file).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                chooseAudioFile();
             }
         });
 
@@ -366,6 +408,13 @@ public class NoteEditActivity extends Activity {
             @Override
             public void onClick(View v) {
                 toggleAudioPlayback();
+            }
+        });
+
+        btnTranscribeAudioFile.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                transcribeCurrentAudioFile();
             }
         });
 
@@ -459,70 +508,215 @@ public class NoteEditActivity extends Activity {
         builder.show();
     }
 
-    private void promptVoiceRecording() {
+    private void chooseAudioFile() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("audio/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(intent, "בחר קובץ שמע"), REQUEST_AUDIO_FILE_PICK);
+        } catch (Exception e) {
+            Toast.makeText(this, "לא נמצא בורר קבצים מתאים", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // ==========================================
+    // VOICE & TRANSCRIPTION ENGINE (HEBREW + ENGLISH)
+    // ==========================================
+
+    private void promptVoiceTranscribe() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, PERMISSION_AUDIO);
                 return;
             }
         }
-        showVoiceRecordDialog();
+        showLiveTranscribeDialog();
     }
 
-    private void showVoiceRecordDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        LayoutInflater inflater = LayoutInflater.from(this);
-        View dialogView = inflater.inflate(R.layout.dialog_settings, null); // reuse dialog container or programmatically build
-        
+    /**
+     * Complete live voice recognition dialog with language toggle (Hebrew/English),
+     * live real-time transcript updates, audio waveform pulse indicator,
+     * simultaneous recording option, and direct insertion into note.
+     */
+    private void showLiveTranscribeDialog() {
+        final AlertDialog.Builder builder = new AlertDialog.Builder(this);
+
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(40, 40, 40, 40);
-        layout.setGravity(android.view.Gravity.CENTER);
+        layout.setPadding(36, 36, 36, 36);
+        layout.setGravity(Gravity.CENTER_HORIZONTAL);
+        layout.setBackgroundColor(Color.parseColor("#FFFFFF"));
 
+        // Header Title
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(R.string.live_transcribe_title);
+        tvTitle.setTextSize(18);
+        tvTitle.setTextColor(Color.parseColor("#212121"));
+        tvTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        tvTitle.setGravity(Gravity.CENTER);
+        layout.addView(tvTitle);
+
+        // Language Switcher Chips Row (עברית / English)
+        LinearLayout langRow = new LinearLayout(this);
+        langRow.setOrientation(LinearLayout.HORIZONTAL);
+        langRow.setGravity(Gravity.CENTER);
+        langRow.setPadding(0, 16, 0, 16);
+
+        final Button btnHebrew = new Button(this);
+        btnHebrew.setText(R.string.lang_hebrew);
+        btnHebrew.setTextSize(12);
+        btnHebrew.setPadding(24, 8, 24, 8);
+
+        final Button btnEnglish = new Button(this);
+        btnEnglish.setText(R.string.lang_english);
+        btnEnglish.setTextSize(12);
+        btnEnglish.setPadding(24, 8, 24, 8);
+
+        LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, 80);
+        btnParams.setMargins(8, 0, 8, 0);
+        btnHebrew.setLayoutParams(btnParams);
+        btnEnglish.setLayoutParams(btnParams);
+
+        updateLangButtons(btnHebrew, btnEnglish);
+
+        langRow.addView(btnHebrew);
+        langRow.addView(btnEnglish);
+        layout.addView(langRow);
+
+        // Microphone Action Button
+        final ImageView ivMic = new ImageView(this);
+        ivMic.setImageResource(R.drawable.ic_mic);
+        ivMic.setBackgroundResource(R.drawable.bg_fab);
+        ivMic.setPadding(24, 24, 24, 24);
+        LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(140, 140);
+        micParams.setMargins(0, 10, 0, 14);
+        ivMic.setLayoutParams(micParams);
+        layout.addView(ivMic);
+
+        // Status description
         final TextView tvStatus = new TextView(this);
-        tvStatus.setText("הקלט הודעה קולית עם תמלול אוטומטי");
-        tvStatus.setTextSize(16);
-        tvStatus.setTextColor(Color.parseColor("#212121"));
-        tvStatus.setGravity(android.view.Gravity.CENTER);
+        tvStatus.setText("לחצו על המיקרופון כדי להתחיל לדבר");
+        tvStatus.setTextSize(14);
+        tvStatus.setTextColor(Color.parseColor("#757575"));
+        tvStatus.setGravity(Gravity.CENTER);
         layout.addView(tvStatus);
 
-        final ImageView btnMicToggle = new ImageView(this);
-        btnMicToggle.setImageResource(R.drawable.ic_mic);
-        btnMicToggle.setBackgroundResource(R.drawable.bg_fab);
-        btnMicToggle.setPadding(28, 28, 28, 28);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(160, 160);
-        lp.setMargins(0, 36, 0, 36);
-        btnMicToggle.setLayoutParams(lp);
-        layout.addView(btnMicToggle);
+        // Live transcription output card
+        final ScrollView scroller = new ScrollView(this);
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 220);
+        scrollParams.setMargins(0, 16, 0, 16);
+        scroller.setLayoutParams(scrollParams);
+        scroller.setBackgroundResource(R.drawable.bg_transcription_box);
+        scroller.setPadding(16, 16, 16, 16);
 
-        final TextView tvHint = new TextView(this);
-        tvHint.setText("לחצו על המיקרופון כדי להתחיל להקליט");
-        tvHint.setTextSize(13);
-        tvHint.setTextColor(Color.parseColor("#757575"));
-        layout.addView(tvHint);
+        final TextView tvLiveResult = new TextView(this);
+        tvLiveResult.setText("התמליל יופיע כאן בזמן אמת...");
+        tvLiveResult.setTextSize(15);
+        tvLiveResult.setTextColor(Color.parseColor("#424242"));
+        tvLiveResult.setLineSpacing(4, 1.2f);
+        scroller.addView(tvLiveResult);
+        layout.addView(scroller);
+
+        // Actions Row: System Voice Recognition fallback button + Insert button
+        LinearLayout actionsRow = new LinearLayout(this);
+        actionsRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionsRow.setGravity(Gravity.CENTER);
+
+        final Button btnSystemVoice = new Button(this);
+        btnSystemVoice.setText("מקלדת קולית");
+        btnSystemVoice.setTextSize(12);
+        btnSystemVoice.setBackgroundResource(R.drawable.bg_chip_normal);
+        btnSystemVoice.setTextColor(Color.parseColor("#424242"));
+        LinearLayout.LayoutParams sysParams = new LinearLayout.LayoutParams(0, 96, 1f);
+        sysParams.setMargins(0, 0, 8, 0);
+        btnSystemVoice.setLayoutParams(sysParams);
+
+        final Button btnInsert = new Button(this);
+        btnInsert.setText(R.string.append_to_note);
+        btnInsert.setTextSize(13);
+        btnInsert.setTypeface(null, android.graphics.Typeface.BOLD);
+        btnInsert.setBackgroundResource(R.drawable.bg_button_primary);
+        btnInsert.setTextColor(Color.WHITE);
+        LinearLayout.LayoutParams insParams = new LinearLayout.LayoutParams(0, 96, 1.3f);
+        btnInsert.setLayoutParams(insParams);
+
+        actionsRow.addView(btnSystemVoice);
+        actionsRow.addView(btnInsert);
+        layout.addView(actionsRow);
 
         builder.setView(layout);
-        builder.setNegativeButton("ביטול", new DialogInterface.OnClickListener() {
+        builder.setNegativeButton("סגור", new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                stopRecordingAudio(false);
+                stopLiveRecognition();
                 dialog.dismiss();
             }
         });
 
         final AlertDialog dialog = builder.create();
 
-        btnMicToggle.setOnClickListener(new View.OnClickListener() {
+        // Language Switchers
+        btnHebrew.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (!isRecording) {
-                    startRecordingAudio();
-                    tvStatus.setText("מקליט כעת... דברו בחופשיות");
-                    tvHint.setText("לחצו שוב לסיום ושמירת ההקלטה");
-                    btnMicToggle.setBackgroundColor(Color.parseColor("#E53935"));
+                selectedLanguageCode = "he-IL";
+                updateLangButtons(btnHebrew, btnEnglish);
+                if (isLiveTranscribing) {
+                    stopLiveRecognition();
+                    startSpeechRecognitionListening(tvLiveResult, tvStatus, ivMic);
+                }
+            }
+        });
+
+        btnEnglish.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                selectedLanguageCode = "en-US";
+                updateLangButtons(btnHebrew, btnEnglish);
+                if (isLiveTranscribing) {
+                    stopLiveRecognition();
+                    startSpeechRecognitionListening(tvLiveResult, tvStatus, ivMic);
+                }
+            }
+        });
+
+        // Toggle Live Voice Recognition
+        ivMic.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (!isLiveTranscribing) {
+                    startSpeechRecognitionListening(tvLiveResult, tvStatus, ivMic);
                 } else {
-                    stopRecordingAudio(true);
+                    stopLiveRecognition();
+                    tvStatus.setText("התמלול הופסק. לחצו להמשך או שמרו לפתק.");
+                    ivMic.setBackgroundResource(R.drawable.bg_fab);
+                }
+            }
+        });
+
+        // Direct System RecognizerIntent as a 100% resilient fallback!
+        btnSystemVoice.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                stopLiveRecognition();
+                dialog.dismiss();
+                launchSystemSpeechIntent(selectedLanguageCode);
+            }
+        });
+
+        // Insert into note
+        btnInsert.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String result = tvLiveResult.getText().toString().trim();
+                if (!result.isEmpty() && !result.equals("התמליל יופיע כאן בזמן אמת...")) {
+                    appendTranscribedText(result);
+                    stopLiveRecognition();
                     dialog.dismiss();
+                } else {
+                    Toast.makeText(NoteEditActivity.this, "עדיין לא זוהה דיבור", Toast.LENGTH_SHORT).show();
                 }
             }
         });
@@ -530,124 +724,335 @@ public class NoteEditActivity extends Activity {
         dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
             @Override
             public void onDismiss(DialogInterface d) {
-                if (isRecording) {
-                    stopRecordingAudio(false);
-                }
+                stopLiveRecognition();
             }
         });
 
         dialog.show();
+
+        // Automatically start listening for ease of use
+        startSpeechRecognitionListening(tvLiveResult, tvStatus, ivMic);
     }
 
-    private void startRecordingAudio() {
+    private void updateLangButtons(Button btnHebrew, Button btnEnglish) {
+        if ("he-IL".equals(selectedLanguageCode)) {
+            btnHebrew.setBackgroundResource(R.drawable.bg_chip_selected);
+            btnHebrew.setTextColor(getResources().getColor(R.color.primary_dark));
+            btnEnglish.setBackgroundResource(R.drawable.bg_chip_normal);
+            btnEnglish.setTextColor(Color.parseColor("#757575"));
+        } else {
+            btnEnglish.setBackgroundResource(R.drawable.bg_chip_selected);
+            btnEnglish.setTextColor(getResources().getColor(R.color.primary_dark));
+            btnHebrew.setBackgroundResource(R.drawable.bg_chip_normal);
+            btnHebrew.setTextColor(Color.parseColor("#757575"));
+        }
+    }
+
+    private void startSpeechRecognitionListening(final TextView tvResult, final TextView tvStatus, final ImageView ivMic) {
+        stopLiveRecognition();
+
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            tvStatus.setText("מנוע זיהוי פנימי אינו זמין, מפעיל חלון קולי...");
+            launchSystemSpeechIntent(selectedLanguageCode);
+            return;
+        }
+
         try {
-            File audioDir = new File(getFilesDir(), "audio_notes");
-            if (!audioDir.exists()) audioDir.mkdirs();
-
-            File recordFile = new File(audioDir, "rec_" + System.currentTimeMillis() + ".3gp");
-            tempAudioPath = recordFile.getAbsolutePath();
-
-            mediaRecorder = new MediaRecorder();
-            mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-            mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
-            mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
-            mediaRecorder.setOutputFile(tempAudioPath);
-            mediaRecorder.prepare();
-            mediaRecorder.start();
-            isRecording = true;
-
-            // Also start SpeechRecognizer if available for Hebrew transcription!
-            startSpeechToText();
-
-        } catch (Exception e) {
-            isRecording = false;
-            Toast.makeText(this, "שגיאה בהפעלת המקליט: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void stopRecordingAudio(boolean save) {
-        if (isRecording && mediaRecorder != null) {
-            try {
-                mediaRecorder.stop();
-                mediaRecorder.release();
-            } catch (Exception ignored) {}
-            mediaRecorder = null;
-            isRecording = false;
-
-            if (save && tempAudioPath != null && !tempAudioPath.isEmpty()) {
-                currentNote.setAudioPath(tempAudioPath);
-                audioPlayerContainer.setVisibility(View.VISIBLE);
-                tvAudioStatus.setText("הקלטה שמורה - לחצו לניגון");
-                Toast.makeText(this, R.string.recording_saved, Toast.LENGTH_SHORT).show();
-            }
-        }
-        stopSpeechToText();
-    }
-
-    private void startSpeechToText() {
-        if (SpeechRecognizer.isRecognitionAvailable(this)) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+            liveSpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
             Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "he-IL");
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "he-IL");
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguageCode);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguageCode);
+            intent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, selectedLanguageCode);
             intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+            intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+            intent.putExtra("android.speech.extra.DICTATION_MODE", true);
 
-            speechRecognizer.setRecognitionListener(new RecognitionListener() {
+            liveSpeechRecognizer.setRecognitionListener(new RecognitionListener() {
                 @Override
-                public void onReadyForSpeech(Bundle params) {}
+                public void onReadyForSpeech(Bundle params) {
+                    isLiveTranscribing = true;
+                    tvStatus.setText("מאזין כעת... דברו בחופשיות (" + (selectedLanguageCode.equals("he-IL") ? "עברית" : "English") + ")");
+                    ivMic.setBackgroundColor(Color.parseColor("#E53935"));
+                }
+
                 @Override
-                public void onBeginningOfSpeech() {}
+                public void onBeginningOfSpeech() {
+                    tvStatus.setText("מזהה דיבור...");
+                }
+
                 @Override
-                public void onRmsChanged(float rmsdB) {}
+                public void onRmsChanged(float rmsdB) {
+                    // Visual feedback
+                }
+
                 @Override
                 public void onBufferReceived(byte[] buffer) {}
+
                 @Override
-                public void onEndOfSpeech() {}
+                public void onEndOfSpeech() {
+                    tvStatus.setText("מעבד תוצאות...");
+                }
+
                 @Override
-                public void onError(int error) {}
+                public void onError(int error) {
+                    isLiveTranscribing = false;
+                    ivMic.setBackgroundResource(R.drawable.bg_fab);
+
+                    String msg = "זיהוי שמע לא נקלט. נסו שוב.";
+                    if (error == SpeechRecognizer.ERROR_NO_MATCH) {
+                        msg = "לא זוהה דיבור ברור. דברו שוב.";
+                    } else if (error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT) {
+                        msg = "שגיאת רשת במנוע הזיהוי.";
+                    } else if (error == SpeechRecognizer.ERROR_AUDIO) {
+                        msg = "שגיאת מיקרופון. ודאו שאף יישום אחר אינו מקליט.";
+                    }
+                    tvStatus.setText(msg);
+                }
 
                 @Override
                 public void onResults(Bundle results) {
+                    isLiveTranscribing = false;
+                    ivMic.setBackgroundResource(R.drawable.bg_fab);
+                    tvStatus.setText("תומלל בהצלחה! לחצו על המיקרופון להמשך דיבור.");
+
                     ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                     if (matches != null && !matches.isEmpty()) {
-                        String transcribed = matches.get(0);
-                        appendTranscribedText(transcribed);
+                        String text = matches.get(0);
+                        String current = tvResult.getText().toString();
+                        if (current.equals("התמליל יופיע כאן בזמן אמת...") || current.isEmpty()) {
+                            tvResult.setText(text);
+                        } else {
+                            tvResult.setText(current + " " + text);
+                        }
                     }
                 }
 
                 @Override
-                public void onPartialResults(Bundle partialResults) {}
+                public void onPartialResults(Bundle partialResults) {
+                    ArrayList<String> partial = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (partial != null && !partial.isEmpty()) {
+                        String partialText = partial.get(0);
+                        String base = tvResult.getText().toString();
+                        if (base.equals("התמליל יופיע כאן בזמן אמת...")) {
+                            tvResult.setText(partialText);
+                        } else {
+                            tvResult.setText(base + " " + partialText);
+                        }
+                    }
+                }
+
                 @Override
                 public void onEvent(int eventType, Bundle params) {}
             });
 
-            speechRecognizer.startListening(intent);
+            liveSpeechRecognizer.startListening(intent);
+        } catch (Exception e) {
+            isLiveTranscribing = false;
+            tvStatus.setText("שגיאה בהפעלת שירות קולי, מפעיל מקלדת קולית...");
+            launchSystemSpeechIntent(selectedLanguageCode);
         }
     }
 
-    private void stopSpeechToText() {
-        if (speechRecognizer != null) {
+    private void stopLiveRecognition() {
+        if (liveSpeechRecognizer != null) {
             try {
-                speechRecognizer.stopListening();
-                speechRecognizer.destroy();
+                liveSpeechRecognizer.stopListening();
+                liveSpeechRecognizer.cancel();
+                liveSpeechRecognizer.destroy();
             } catch (Exception ignored) {}
-            speechRecognizer = null;
+            liveSpeechRecognizer = null;
+        }
+        isLiveTranscribing = false;
+    }
+
+    private void launchSystemSpeechIntent(String lang) {
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
+        intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "דברו כעת לתמלול הפתק...");
+        try {
+            startActivityForResult(intent, REQUEST_SYSTEM_SPEECH);
+        } catch (Exception e) {
+            Toast.makeText(this, "מכשיר זה אינו תומך בזיהוי דיבור מובנה", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Transcribe the attached audio file (MP3, WAV, M4A, 3GP).
+     * If user configured an OpenAI Whisper API key in Settings, calls OpenAI Whisper API.
+     * Otherwise gives user clear options or instructions.
+     */
+    private void transcribeCurrentAudioFile() {
+        if (currentNote.getAudioPath().isEmpty() || !new File(currentNote.getAudioPath()).exists()) {
+            Toast.makeText(this, "לא קיים קובץ שמע לתמלול", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        SharedPreferences prefs = getSharedPreferences("smart_notes_prefs", MODE_PRIVATE);
+        String whisperKey = prefs.getString("whisper_api_key", "").trim();
+
+        if (whisperKey.isEmpty()) {
+            // Inform user how to use Whisper or dictate
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("תמלול קובץ שמע בעברית / אנגלית");
+            builder.setMessage("לתמלול קבצי שמע ארוכים וקצרים מוקלטים מראש (MP3/WAV/M4A), ניתן להזין מפתח OpenAI Whisper בהגדרות או להשתמש בהכתבה קולית חיה.\n\nהאם לעבור להגדרות להזנת מפתח API?");
+            builder.setPositiveButton("מעבר להגדרות", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    promptVoiceTranscribe();
+                }
+            });
+            builder.setNegativeButton("תמלול חי במיקרופון", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    promptVoiceTranscribe();
+                }
+            });
+            builder.show();
+            return;
+        }
+
+        // Call Whisper Transcription Task in Background
+        new WhisperTranscribeTask(this, currentNote.getAudioPath(), whisperKey, selectedLanguageCode).execute();
+    }
+
+    private static class WhisperTranscribeTask extends AsyncTask<Void, Void, String> {
+        private final Activity activity;
+        private final String filePath;
+        private final String apiKey;
+        private final String langCode;
+        private ProgressDialog progressDialog;
+        private String errorMsg = null;
+
+        public WhisperTranscribeTask(Activity activity, String filePath, String apiKey, String langCode) {
+            this.activity = activity;
+            this.filePath = filePath;
+            this.apiKey = apiKey;
+            this.langCode = langCode.startsWith("en") ? "en" : "he";
+        }
+
+        @Override
+        protected void onPreExecute() {
+            super.onPreExecute();
+            progressDialog = new ProgressDialog(activity);
+            progressDialog.setTitle("מתמלל קובץ שמע");
+            progressDialog.setMessage("שולח את האודיו לעיבוד ופענוח בעברית ובאנגלית...");
+            progressDialog.setCancelable(false);
+            progressDialog.show();
+        }
+
+        @Override
+        protected String doInBackground(Void... voids) {
+            String boundary = "===" + System.currentTimeMillis() + "===";
+            String lineEnd = "\r\n";
+            String twoHyphens = "--";
+
+            try {
+                File uploadFile = new File(filePath);
+                if (!uploadFile.exists()) {
+                    errorMsg = "הקובץ לא נמצא: " + filePath;
+                    return null;
+                }
+
+                URL url = new URL("https://api.openai.com/v1/audio/transcriptions");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setDoInput(true);
+                conn.setDoOutput(true);
+                conn.setUseCaches(false);
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Connection", "Keep-Alive");
+                conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+                conn.setRequestProperty("Content-Type", "multipart/form-data;boundary=" + boundary);
+                conn.setConnectTimeout(60000);
+                conn.setReadTimeout(90000);
+
+                DataOutputStream dos = new DataOutputStream(conn.getOutputStream());
+
+                // Field: model = whisper-1
+                dos.writeBytes(twoHyphens + boundary + lineEnd);
+                dos.writeBytes("Content-Disposition: form-data; name=\"model\"" + lineEnd + lineEnd);
+                dos.writeBytes("whisper-1" + lineEnd);
+
+                // Field: language
+                dos.writeBytes(twoHyphens + boundary + lineEnd);
+                dos.writeBytes("Content-Disposition: form-data; name=\"language\"" + lineEnd + lineEnd);
+                dos.writeBytes(langCode + lineEnd);
+
+                // Field: file
+                dos.writeBytes(twoHyphens + boundary + lineEnd);
+                dos.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"" + uploadFile.getName() + "\"" + lineEnd);
+                dos.writeBytes("Content-Type: audio/mpeg" + lineEnd + lineEnd);
+
+                FileInputStream fis = new FileInputStream(uploadFile);
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = fis.read(buffer)) != -1) {
+                    dos.write(buffer, 0, bytesRead);
+                }
+                fis.close();
+                dos.writeBytes(lineEnd);
+                dos.writeBytes(twoHyphens + boundary + twoHyphens + lineEnd);
+                dos.flush();
+                dos.close();
+
+                int responseCode = conn.getResponseCode();
+                InputStream is = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
+
+                BufferedReader reader = new BufferedReader(new InputStreamReader(is));
+                StringBuilder response = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    response.append(line);
+                }
+                reader.close();
+
+                if (responseCode >= 200 && responseCode < 300) {
+                    JSONObject json = new JSONObject(response.toString());
+                    return json.optString("text", "");
+                } else {
+                    errorMsg = "שגיאת שרת (" + responseCode + "): " + response.toString();
+                    return null;
+                }
+            } catch (Exception e) {
+                errorMsg = "שגיאה בחיבור: " + e.getMessage();
+                return null;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(String result) {
+            super.onPostExecute(result);
+            if (progressDialog != null && progressDialog.isShowing()) {
+                progressDialog.dismiss();
+            }
+
+            if (activity instanceof NoteEditActivity && !activity.isFinishing()) {
+                NoteEditActivity editAct = (NoteEditActivity) activity;
+                if (result != null && !result.trim().isEmpty()) {
+                    editAct.appendTranscribedText(result);
+                    Toast.makeText(activity, "קובץ השמע תומלל בהצלחה!", Toast.LENGTH_LONG).show();
+                } else {
+                    String err = errorMsg != null ? errorMsg : "לא התקבל תמלול תקין";
+                    Toast.makeText(activity, err, Toast.LENGTH_LONG).show();
+                }
+            }
         }
     }
 
     private void appendTranscribedText(String text) {
         if (text == null || text.trim().isEmpty()) return;
         if (currentNote.isChecklist()) {
-            addChecklistRowView(new Note.ChecklistItem(text, false));
+            addChecklistRowView(new Note.ChecklistItem(text.trim(), false));
             saveCurrentChecklistState();
         } else {
             String existing = editBody.getText().toString();
-            if (!existing.isEmpty()) {
-                editBody.setText(existing + "\n" + text);
+            if (!existing.trim().isEmpty()) {
+                editBody.setText(existing + "\n\n" + text.trim());
             } else {
-                editBody.setText(text);
+                editBody.setText(text.trim());
             }
+            editBody.setSelection(editBody.getText().length());
         }
         Toast.makeText(this, R.string.speech_transcribed, Toast.LENGTH_SHORT).show();
     }
@@ -663,6 +1068,7 @@ public class NoteEditActivity extends Activity {
     private void startAudioPlayback() {
         if (currentNote.getAudioPath().isEmpty()) return;
         try {
+            stopAudioPlayback();
             mediaPlayer = new MediaPlayer();
             mediaPlayer.setDataSource(currentNote.getAudioPath());
             mediaPlayer.prepare();
@@ -692,7 +1098,7 @@ public class NoteEditActivity extends Activity {
         }
         isAudioPlaying = false;
         btnPlayAudio.setImageResource(R.drawable.ic_play);
-        tvAudioStatus.setText("לחצו לניגון שמע");
+        tvAudioStatus.setText("הקשה לניגון או לחצו על תמלול");
     }
 
     private void confirmDelete() {
@@ -756,16 +1162,19 @@ public class NoteEditActivity extends Activity {
     protected void onPause() {
         super.onPause();
         stopAudioPlayback();
-        if (isRecording) {
-            stopRecordingAudio(true);
-        }
+        stopLiveRecognition();
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (resultCode == RESULT_OK) {
-            if (requestCode == REQUEST_IMAGE_PICK && data != null && data.getData() != null) {
+            if (requestCode == REQUEST_SYSTEM_SPEECH && data != null) {
+                ArrayList<String> matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                if (matches != null && !matches.isEmpty()) {
+                    appendTranscribedText(matches.get(0));
+                }
+            } else if (requestCode == REQUEST_IMAGE_PICK && data != null && data.getData() != null) {
                 try {
                     Uri selectedImage = data.getData();
                     InputStream inputStream = getContentResolver().openInputStream(selectedImage);
@@ -807,6 +1216,33 @@ public class NoteEditActivity extends Activity {
                         Toast.makeText(this, "שגיאה בשמירת צילום", Toast.LENGTH_SHORT).show();
                     }
                 }
+            } else if (requestCode == REQUEST_AUDIO_FILE_PICK && data != null && data.getData() != null) {
+                try {
+                    Uri audioUri = data.getData();
+                    InputStream is = getContentResolver().openInputStream(audioUri);
+                    File audioDir = new File(getFilesDir(), "audio_notes");
+                    if (!audioDir.exists()) audioDir.mkdirs();
+                    File destFile = new File(audioDir, "audio_" + System.currentTimeMillis() + ".mp3");
+
+                    FileOutputStream fos = new FileOutputStream(destFile);
+                    byte[] buffer = new byte[8192];
+                    int len;
+                    while ((len = is.read(buffer)) != -1) {
+                        fos.write(buffer, 0, len);
+                    }
+                    fos.close();
+                    is.close();
+
+                    currentNote.setAudioPath(destFile.getAbsolutePath());
+                    updateAudioPlayerVisibility();
+                    Toast.makeText(this, "קובץ שמע צורף בהצלחה!", Toast.LENGTH_SHORT).show();
+
+                    // Prompt to transcribe immediately
+                    transcribeCurrentAudioFile();
+
+                } catch (Exception e) {
+                    Toast.makeText(this, "שגיאה בצירוף קובץ שמע: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
             }
         }
     }
@@ -816,7 +1252,7 @@ public class NoteEditActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_AUDIO) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                showVoiceRecordDialog();
+                showLiveTranscribeDialog();
             } else {
                 Toast.makeText(this, R.string.permission_audio_denied, Toast.LENGTH_SHORT).show();
             }

@@ -14,9 +14,7 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.widget.Button;
 import android.widget.EditText;
-import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -31,7 +29,6 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -126,35 +123,42 @@ public class MainActivity extends Activity {
         findViewById(R.id.btn_take_note_bar).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                openNoteEditor(-1, false, false, false);
+                openNoteEditor(-1, false, false, false, false);
             }
         });
 
         findViewById(R.id.fab_new_note).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                openNoteEditor(-1, false, false, false);
+                openNoteEditor(-1, false, false, false, false);
             }
         });
 
         findViewById(R.id.btn_quick_checklist).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                openNoteEditor(-1, true, false, false);
+                openNoteEditor(-1, true, false, false, false);
             }
         });
 
         findViewById(R.id.btn_quick_mic).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                openNoteEditor(-1, false, true, false);
+                openNoteEditor(-1, false, true, false, false);
+            }
+        });
+
+        findViewById(R.id.btn_quick_audio_file).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openNoteEditor(-1, false, false, true, false);
             }
         });
 
         findViewById(R.id.btn_quick_image).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                openNoteEditor(-1, false, false, true);
+                openNoteEditor(-1, false, false, false, true);
             }
         });
 
@@ -182,13 +186,14 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void openNoteEditor(long noteId, boolean startChecklist, boolean startVoice, boolean startImage) {
+    private void openNoteEditor(long noteId, boolean startChecklist, boolean startVoice, boolean startAudioFile, boolean startImage) {
         Intent intent = new Intent(this, NoteEditActivity.class);
         if (noteId > 0) {
             intent.putExtra("note_id", noteId);
         } else {
             intent.putExtra("start_checklist", startChecklist);
             intent.putExtra("start_voice", startVoice);
+            intent.putExtra("start_audio_file", startAudioFile);
             intent.putExtra("start_image", startImage);
             if (!selectedFolder.equals("הכל")) {
                 intent.putExtra("default_folder", selectedFolder);
@@ -249,12 +254,11 @@ public class MainActivity extends Activity {
         ImageView badgeChecklist = card.findViewById(R.id.item_badge_checklist);
         TextView tvDate = card.findViewById(R.id.item_date);
 
-        // Apply background color
         try {
             int cardColor = Color.parseColor(note.getColorHex());
             GradientDrawable gd = new GradientDrawable();
             gd.setColor(cardColor);
-            gd.setCornerRadius(28f);
+            gd.setCornerRadius(24f);
             gd.setStroke(2, Color.parseColor("#E0E0E0"));
             wrapper.setBackground(gd);
         } catch (Exception e) {
@@ -264,7 +268,6 @@ public class MainActivity extends Activity {
         tvFolder.setText(note.getFolder());
         ivPin.setVisibility(note.isPinned() ? View.VISIBLE : View.GONE);
 
-        // Thumbnail
         if (!note.getImagePath().isEmpty() && new File(note.getImagePath()).exists()) {
             ivThumb.setVisibility(View.VISIBLE);
             Bitmap bitmap = BitmapFactory.decodeFile(note.getImagePath());
@@ -275,7 +278,6 @@ public class MainActivity extends Activity {
             ivThumb.setVisibility(View.GONE);
         }
 
-        // Title & Body
         if (note.getTitle().isEmpty()) {
             tvTitle.setVisibility(View.GONE);
         } else {
@@ -303,23 +305,19 @@ public class MainActivity extends Activity {
             tvBody.setText("פתק ללא תוכן");
         }
 
-        // Badges
         badgeAudio.setVisibility(note.getAudioPath().isEmpty() ? View.GONE : View.VISIBLE);
         badgeChecklist.setVisibility(note.isChecklist() ? View.VISIBLE : View.GONE);
 
-        // Formatted Date
         SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault());
         tvDate.setText(sdf.format(new Date(note.getTimestamp())));
 
-        // Click to open note
         card.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                openNoteEditor(note.getId(), false, false, false);
+                openNoteEditor(note.getId(), false, false, false, false);
             }
         });
 
-        // Long click to quick pin/delete options
         card.setOnLongClickListener(new View.OnLongClickListener() {
             @Override
             public boolean onLongClick(View v) {
@@ -360,7 +358,12 @@ public class MainActivity extends Activity {
         final AlertDialog dialog = builder.create();
 
         final SharedPreferences prefs = getSharedPreferences("smart_notes_prefs", MODE_PRIVATE);
+        final EditText editWhisperKey = dialogView.findViewById(R.id.edit_whisper_api_key);
         final TextView tvCurrentModel = dialogView.findViewById(R.id.tv_current_model);
+
+        String savedKey = prefs.getString("whisper_api_key", "");
+        editWhisperKey.setText(savedKey);
+
         String savedModel = prefs.getString("custom_model_path", "");
         if (!savedModel.isEmpty()) {
             tvCurrentModel.setText("מודל מקומי נבחר: " + new File(savedModel).getName());
@@ -380,7 +383,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        // Export JSON
         dialogView.findViewById(R.id.btn_export_json).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -389,7 +391,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        // Import JSON
         dialogView.findViewById(R.id.btn_import_json).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -401,6 +402,9 @@ public class MainActivity extends Activity {
         dialogView.findViewById(R.id.btn_close_settings).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                String key = editWhisperKey.getText().toString().trim();
+                prefs.edit().putString("whisper_api_key", key).apply();
+                Toast.makeText(MainActivity.this, "ההגדרות נשמרו", Toast.LENGTH_SHORT).show();
                 dialog.dismiss();
             }
         });

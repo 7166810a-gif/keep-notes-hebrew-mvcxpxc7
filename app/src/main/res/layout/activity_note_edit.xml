@@ -9,7 +9,7 @@
         android:id="@+id/edit_top_bar"
         android:layout_width="match_parent"
         android:layout_height="54dp"
-        android:background="#05000000"
+        android:background="#08000000"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="12dp"
@@ -117,7 +117,7 @@
                     android:src="@drawable/ic_delete" />
             </FrameLayout>
 
-            <!-- Voice Recording Player Card -->
+            <!-- Audio Player & Transcription Action Card -->
             <LinearLayout
                 android:id="@+id/audio_player_container"
                 android:layout_width="match_parent"
@@ -149,8 +149,10 @@
                         android:id="@+id/tv_audio_title"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="הקלטה קולית שמורה"
-                        android:textColor="#333333"
+                        android:ellipsize="middle"
+                        android:singleLine="true"
+                        android:text="קובץ שמע / הקלטה"
+                        android:textColor="#212121"
                         android:textSize="14sp"
                         android:textStyle="bold" />
 
@@ -159,16 +161,27 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
-                        android:text="לחצו לניגון שמע"
+                        android:text="לחצו לניגון או לתמלול מחדש"
                         android:textColor="#757575"
                         android:textSize="12sp" />
                 </LinearLayout>
 
                 <ImageView
+                    android:id="@+id/btn_transcribe_audio_file"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="תמלל קובץ שמע"
+                    android:padding="7dp"
+                    android:src="@drawable/ic_transcribe" />
+
+                <ImageView
                     android:id="@+id/btn_remove_audio"
                     android:layout_width="36dp"
                     android:layout_height="36dp"
+                    android:layout_marginStart="4dp"
                     android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="הסר שמע"
                     android:padding="6dp"
                     android:src="@drawable/ic_delete" />
             </LinearLayout>
@@ -197,7 +210,7 @@
                 android:gravity="top|start"
                 android:hint="@string/note_body_hint"
                 android:inputType="textMultiLine"
-                android:lineSpacingExtra="4dp"
+                android:lineSpacingExtra="5dp"
                 android:minLines="6"
                 android:textColor="#333333"
                 android:textColorHint="#BDBDBD"
@@ -234,7 +247,7 @@
     <LinearLayout
         android:id="@+id/edit_bottom_tools"
         android:layout_width="match_parent"
-        android:layout_height="52dp"
+        android:layout_height="54dp"
         android:layout_alignParentBottom="true"
         android:background="#FAFAFA"
         android:gravity="center_vertical"
@@ -255,17 +268,27 @@
             android:id="@+id/btn_tool_mic"
             android:layout_width="38dp"
             android:layout_height="38dp"
-            android:layout_marginStart="12dp"
+            android:layout_marginStart="10dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/record_audio"
             android:padding="7dp"
             android:src="@drawable/ic_mic" />
 
         <ImageView
+            android:id="@+id/btn_tool_audio_file"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginStart="10dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/attach_audio"
+            android:padding="7dp"
+            android:src="@drawable/ic_audio_file" />
+
+        <ImageView
             android:id="@+id/btn_tool_image"
             android:layout_width="38dp"
             android:layout_height="38dp"
-            android:layout_marginStart="12dp"
+            android:layout_marginStart="10dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/add_image"
             android:padding="7dp"
