@@ -1,0 +1,32 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <!-- Rounded Background Square -->
+    <path
+        android:fillColor="#FFFB8C00"
+        android:pathData="M16,0 L80,0 A16,16 0 0,1 96,16 L96,80 A16,16 0 0,1 80,96 L16,96 A16,16 0 0,1 0,80 L0,16 A16,16 0 0,1 16,0 Z" />
+    <!-- Note Page Body -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M26,20 L62,20 L74,32 L74,74 A4,4 0 0,1 70,78 L26,78 A4,4 0 0,1 22,74 L22,24 A4,4 0 0,1 26,20 Z" />
+    <!-- Note Folded Corner -->
+    <path
+        android:fillColor="#FFE0E0E0"
+        android:pathData="M62,20 L62,32 L74,32 Z" />
+    <!-- Note Lines -->
+    <path
+        android:fillColor="#FFFFB300"
+        android:pathData="M30,38 L58,38 A2,2 0 0,1 58,42 L30,42 A2,2 0 0,1 30,38 Z" />
+    <path
+        android:fillColor="#FFFFB300"
+        android:pathData="M30,48 L66,48 A2,2 0 0,1 66,52 L30,52 A2,2 0 0,1 30,48 Z" />
+    <path
+        android:fillColor="#FFFFB300"
+        android:pathData="M30,58 L54,58 A2,2 0 0,1 54,62 L30,62 A2,2 0 0,1 30,58 Z" />
+    <!-- Voice / Mic Accent Dot -->
+    <path
+        android:fillColor="#FFE65100"
+        android:pathData="M64,62 A4,4 0 1,1 64,70 A4,4 0 1,1 64,62 Z" />
+</vector>

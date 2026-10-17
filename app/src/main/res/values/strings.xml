@@ -1,0 +1,35 @@
+<resources>
+    <string name="app_name">פתקים חכמים</string>
+    <string name="search_hint">חיפוש בהערות...</string>
+    <string name="all_notes">הכל</string>
+    <string name="folder_personal">אישי</string>
+    <string name="folder_work">עבודה</string>
+    <string name="folder_ideas">רעיונות</string>
+    <string name="folder_shopping">קניות</string>
+    <string name="pinned_notes">הערות מוצמדות</string>
+    <string name="other_notes">שאר ההערות</string>
+    <string name="empty_notes_title">עדיין אין הערות</string>
+    <string name="empty_notes_subtitle">לחצו על + או על הכלים למטה להוספת פתק חדש</string>
+    <string name="note_title_hint">כותרת</string>
+    <string name="note_body_hint">הקלידו פתק כאן...</string>
+    <string name="save">שמור</string>
+    <string name="delete">מחק</string>
+    <string name="pin">הצמד</string>
+    <string name="unpin">בטל הצמדה</string>
+    <string name="record_audio">הקלטה קולית</string>
+    <string name="stop_recording">סיום הקלטה</string>
+    <string name="add_image">הוספת תמונה</string>
+    <string name="add_checklist">רשימת משימות</string>
+    <string name="settings">הגדרות</string>
+    <string name="settings_title">הגדרות וניהול מודלים</string>
+    <string name="ai_model_title">מודל תמלול קולי מקומי (Offline)</string>
+    <string name="ai_model_desc">טעינת קובץ מודל Whisper / ONNX מקומי מהמכשיר עבור תמלול שמע ללא אינטרנט.</string>
+    <string name="choose_model_file">בחר קובץ מודל (.bin, .onnx)</string>
+    <string name="export_data">ייצוא גיבוי נתונים (JSON)</string>
+    <string name="import_data">ייבוא גיבוי</string>
+    <string name="recording_saved">ההקלטה נשמרה בהצלחה</string>
+    <string name="speech_transcribed">הדיבור תומלל בהצלחה!</string>
+    <string name="permission_audio_denied">דרושה הרשאת מיקרופון להקלטה</string>
+    <string name="checklist_item_hint">משימה חדשה...</string>
+    <string name="close">סגור</string>
+</resources>

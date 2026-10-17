@@ -1,0 +1,19 @@
+<resources>
+    <color name="primary">#FF9800</color>
+    <color name="primary_dark">#F57C00</color>
+    <color name="accent">#FF5722</color>
+    <color name="bg_main">#F8F9FA</color>
+    <color name="text_main">#212121</color>
+    <color name="text_secondary">#757575</color>
+    <color name="divider">#E0E0E0</color>
+
+    <!-- Note Pastel Colors (Google Keep style) -->
+    <color name="note_color_white">#FFFFFF</color>
+    <color name="note_color_red">#FFEBEE</color>
+    <color name="note_color_orange">#FFF3E0</color>
+    <color name="note_color_yellow">#FFFDE7</color>
+    <color name="note_color_green">#E8F5E9</color>
+    <color name="note_color_cyan">#E0F7FA</color>
+    <color name="note_color_blue">#E3F2FD</color>
+    <color name="note_color_purple">#F3E5F5</color>
+</resources>
